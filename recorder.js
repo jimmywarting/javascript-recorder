@@ -266,6 +266,8 @@ class Recorder {
    * @private
    */
   _createFunctionFromChannel(channelId, objectMap) {
+    let callIdCounter = 0;
+    
     // Return a function that sends calls through the channel
     return (...args) => {
       // Get the channel info
@@ -291,29 +293,39 @@ class Recorder {
           }
         }
         
-        // For other objects, try to serialize them
-        // If the object is not serializable, we'll get an error
-        try {
-          // Test if it can be structured cloned
-          structuredClone(arg);
-          return arg;
-        } catch (e) {
-          // Object is not serializable, return a placeholder
-          console.warn(`[Recorder] Non-serializable argument in callback:`, e.message);
-          return { __nonSerializable: true, type: typeof arg };
-        }
+        // For other objects, try to send them as-is
+        // postMessage will handle structured clone
+        return arg;
       });
       
       // Send the function call
       try {
         channelInfo.port.postMessage({
           args: serializedArgs,
-          callId: Math.random().toString(36)
+          callId: `call_${callIdCounter++}`
         });
       } catch (error) {
-        console.error('[Recorder] Error sending callback args:', error);
-        if (this.onerror) {
-          this.onerror(error);
+        // If postMessage fails, try with placeholders for non-serializable args
+        console.warn('[Recorder] Some arguments are not serializable, sending placeholders');
+        const placeholderArgs = args.map((arg, idx) => {
+          if (arg === null || arg === undefined) return arg;
+          if (typeof arg === 'string' || typeof arg === 'number' || 
+              typeof arg === 'boolean' || typeof arg === 'bigint') {
+            return arg;
+          }
+          return { __nonSerializable: true, type: typeof arg, index: idx };
+        });
+        
+        try {
+          channelInfo.port.postMessage({
+            args: placeholderArgs,
+            callId: `call_${callIdCounter - 1}`
+          });
+        } catch (retryError) {
+          console.error('[Recorder] Error sending callback args:', retryError);
+          if (this.onerror) {
+            this.onerror(retryError);
+          }
         }
       }
     };
@@ -345,7 +357,7 @@ class Recorder {
    * Handle messages received via MessagePort
    * @private
    */
-  _handlePortMessage(data, event) {
+  _handlePortMessage(data, event = null) {
     if (!data || typeof data !== 'object') {
       console.warn('[Recorder] Invalid message received via MessagePort:', data);
       return;
@@ -358,7 +370,7 @@ class Recorder {
       }
       if (this.replayContext) {
         // Extract any transferred ports from the event
-        const transferredPorts = event.ports || [];
+        const transferredPorts = (event && event.ports) || [];
         
         // Process operations to map function channels and streams to transferred ports
         let portIndex = 0;
