@@ -149,6 +149,14 @@ class Recorder {
   replay(context) {
     const recordingsToReplay = [...this.recordings];
     this.recordings = [];
+    
+    // If a different context is provided, update the replay context and object map
+    if (context !== this.replayContext) {
+      this.replayContext = context;
+      this.replayObjectMap = new Map();
+      this.replayObjectMap.set('globalThis', context);
+    }
+    
     return this._replayRecordings(recordingsToReplay, context);
   }
 
