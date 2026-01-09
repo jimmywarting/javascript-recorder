@@ -63,8 +63,8 @@ console.log('\n--- Phase 2: Automatic Replay (will execute on next microtask) --
 console.log('Waiting for microtask to execute automatic replay...\n');
 
 // The replay will happen automatically on the next microtask
-// Let's wait a bit to see it
-await new Promise(resolve => setTimeout(resolve, 10));
+// Use queueMicrotask for precise microtask waiting
+await new Promise(resolve => queueMicrotask(resolve));
 
 console.log('\n' + '='.repeat(60));
 console.log('Notice: Operations were recorded but NOT executed during recording.');

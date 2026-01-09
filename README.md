@@ -90,7 +90,7 @@ const handler = createRecordHandler(recorder);
 const proxied = new Proxy({}, handler);
 
 // Record operations
-proxied.document.createElement('div');
+const ref = proxied.document.createElement('div');
 proxied.document.body.append(ref);
 
 // Later, replay in actual context
