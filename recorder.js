@@ -25,6 +25,9 @@ class Recorder {
     // Pending transferables to be sent with next operations batch
     this.pendingTransferables = [];
     
+    // Persistent object map for replay - maintains object references across operation batches
+    this.replayObjectMap = new Map();
+    
     // Set up FinalizationRegistry for automatic cleanup when objects are garbage collected
     if (this.useFinalization && typeof FinalizationRegistry !== 'undefined') {
       this.finalizationRegistry = new FinalizationRegistry((objectId) => {
@@ -39,6 +42,11 @@ class Recorder {
     } else {
       this.finalizationRegistry = null;
       this.channelFinalizationRegistry = null;
+    }
+    
+    // Initialize replayObjectMap with the replay context if provided
+    if (this.replayContext) {
+      this.replayObjectMap.set('globalThis', this.replayContext);
     }
     
     // If port is provided, set up message handler for receiving replay commands
@@ -114,6 +122,9 @@ class Recorder {
    */
   setReplayContext(context) {
     this.replayContext = context;
+    // Reset the object map when replay context changes
+    this.replayObjectMap = new Map();
+    this.replayObjectMap.set('globalThis', context);
   }
 
   /**
@@ -138,6 +149,14 @@ class Recorder {
   replay(context) {
     const recordingsToReplay = [...this.recordings];
     this.recordings = [];
+    
+    // If a different context is provided, update the replay context and object map
+    if (context !== this.replayContext) {
+      this.replayContext = context;
+      this.replayObjectMap = new Map();
+      this.replayObjectMap.set('globalThis', context);
+    }
+    
     return this._replayRecordings(recordingsToReplay, context);
   }
 
@@ -147,8 +166,14 @@ class Recorder {
    */
   _replayRecordings(recordings, context) {
     const results = [];
-    const objectMap = new Map();
-    objectMap.set('globalThis', context);
+    // Use the persistent objectMap to maintain object references across operation batches
+    // This is critical for nested operations in callbacks to reference objects from earlier batches
+    const objectMap = this.replayObjectMap;
+    
+    // Ensure globalThis is set (in case objectMap was cleared or not initialized)
+    if (!objectMap.has('globalThis')) {
+      objectMap.set('globalThis', context);
+    }
 
     for (const operation of recordings) {
       try {
