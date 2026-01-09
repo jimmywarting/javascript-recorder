@@ -1,0 +1,22 @@
+{
+  "name": "javascript-recorder",
+  "version": "1.0.0",
+  "description": "Records exactly everything you do inside of JavaScript using JavaScript Proxies",
+  "main": "recorder.js",
+  "type": "module",
+  "scripts": {
+    "test": "node test.js"
+  },
+  "keywords": [
+    "proxy",
+    "recorder",
+    "replay",
+    "javascript"
+  ],
+  "author": "Jimmy Wärting",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jimmywarting/javascript-recorder.git"
+  }
+}
