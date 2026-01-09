@@ -555,10 +555,16 @@ class Recorder {
     }
     
     try {
-      // Send the actual object back
+      // Try to send the actual object back
+      // This only works for structured-cloneable objects
       responsePort?.postMessage({ result: obj });
     } catch (error) {
-      responsePort?.postMessage({ error: error.message });
+      // Object is not serializable
+      responsePort?.postMessage({ 
+        error: `Object cannot be serialized: ${error.message}`,
+        objectType: typeof obj,
+        isFunction: typeof obj === 'function'
+      });
     }
   }
 
@@ -590,9 +596,28 @@ class Recorder {
   }
 
   /**
-   * Evaluate a proxy reference to get its actual value
+   * Evaluate a proxy reference to get its actual value from the replay context
+   * 
+   * NOTE: This is an MVP implementation that only works for structured-cloneable objects.
+   * Non-serializable objects (like DOM nodes, functions, etc.) cannot be evaluated.
+   * 
+   * Supported types:
+   * - Primitives (string, number, boolean, null, undefined, bigint)
+   * - Plain objects and arrays
+   * - Date, RegExp, Map, Set
+   * - ArrayBuffer, TypedArrays, DataView
+   * - Blob, File
+   * - ImageData
+   * 
+   * Not supported:
+   * - DOM nodes/elements
+   * - Functions
+   * - Symbol values
+   * - Complex objects with prototypes
+   * 
    * @param {Object} proxyRef - The proxy reference with __recordedObjectId
-   * @returns {Promise<any>} The actual value from the other context
+   * @returns {Promise<any>} The actual value from the other context (if serializable)
+   * @throws {Error} If object cannot be serialized or port not configured
    */
   async evaluate(proxyRef) {
     if (!this.port) {
