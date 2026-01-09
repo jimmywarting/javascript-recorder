@@ -241,7 +241,9 @@ A wrapper class that provides automatic reference counting with Symbol.dispose s
 
 ## Browser Testing
 
-Open `test-browser.html` in a web browser to run interactive tests:
+### Interactive Test Pages
+
+Open these HTML pages in a web browser to see the recorder in action:
 
 ```bash
 # Serve the files with a local web server
@@ -250,13 +252,27 @@ python3 -m http.server 8000
 npx serve .
 ```
 
-Then open `http://localhost:8000/test-browser.html` in your browser.
+**Main test pages:**
+- `test-browser.html` - Comprehensive testing with real DOM APIs
+- `demo-using-finalization.html` - Interactive demos of `using` keyword and finalization
 
-The browser test page includes:
+### test-browser.html
+
+Comprehensive test suite with real browser APIs:
 - Basic DOM recording and replay
 - MessagePort communication simulation
 - Real Web Worker integration
-- Complex DOM operations
+- Complex DOM operations with styles and events
+
+### demo-using-finalization.html
+
+Interactive demonstrations of memory management features:
+- **Demo 1:** Using keyword for deterministic cleanup
+- **Demo 2:** FinalizationRegistry for automatic garbage collection
+- **Demo 3:** Side-by-side comparison of both approaches
+- **Demo 4:** Reference counting visualization
+
+Open `http://localhost:8000/demo-using-finalization.html` for interactive demos!
 
 ## Recording Format
 
