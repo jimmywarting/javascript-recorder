@@ -13,6 +13,7 @@ class Recorder {
     this.objectRefCounts = new Map(); // Track reference counts for cross-context objects
     this.objectRegistry = new Map(); // Store actual objects for reference tracking
     this.useFinalization = options.useFinalization ?? true; // Enable finalization by default
+    this.debug = options.debug ?? false; // Debug logging for finalization
     
     // Set up FinalizationRegistry for automatic cleanup when objects are garbage collected
     if (this.useFinalization && typeof FinalizationRegistry !== 'undefined') {
@@ -336,7 +337,9 @@ class Recorder {
     // Decrement ref count when object is finalized
     const currentCount = this.objectRefCounts.get(objectId);
     if (currentCount !== undefined && currentCount > 0) {
-      console.log(`[Recorder] Finalizing object ${objectId}, ref count: ${currentCount}`);
+      if (this.debug) {
+        console.log(`[Recorder] Finalizing object ${objectId}, ref count: ${currentCount}`);
+      }
       this._updateRefCount(objectId, -1);
       
       // Send finalization notification through port if available
