@@ -24,6 +24,8 @@ Or simply clone and use:
 git clone https://github.com/jimmywarting/javascript-recorder.git
 ```
 
+**Note:** This package is ES module only. You must use `import` syntax, not `require()`.
+
 ## Usage
 
 ### Basic Example
