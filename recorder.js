@@ -277,20 +277,45 @@ class Recorder {
       
       // Serialize arguments - replace objects in objectMap with their IDs
       const serializedArgs = args.map(arg => {
-        // Check if this is an object from the replay context
+        // Primitives can be sent directly
+        if (arg === null || arg === undefined) return arg;
+        if (typeof arg === 'string' || typeof arg === 'number' || 
+            typeof arg === 'boolean' || typeof arg === 'bigint') {
+          return arg;
+        }
+        
+        // Check if this is an object from the replay context that we're tracking
         for (const [id, obj] of objectMap.entries()) {
           if (obj === arg) {
             return { __recordedObjectId: id };
           }
         }
-        return arg;
+        
+        // For other objects, try to serialize them
+        // If the object is not serializable, we'll get an error
+        try {
+          // Test if it can be structured cloned
+          structuredClone(arg);
+          return arg;
+        } catch (e) {
+          // Object is not serializable, return a placeholder
+          console.warn(`[Recorder] Non-serializable argument in callback:`, e.message);
+          return { __nonSerializable: true, type: typeof arg };
+        }
       });
       
       // Send the function call
-      channelInfo.port.postMessage({
-        args: serializedArgs,
-        callId: Math.random().toString(36)
-      });
+      try {
+        channelInfo.port.postMessage({
+          args: serializedArgs,
+          callId: Math.random().toString(36)
+        });
+      } catch (error) {
+        console.error('[Recorder] Error sending callback args:', error);
+        if (this.onerror) {
+          this.onerror(error);
+        }
+      }
     };
   }
 
