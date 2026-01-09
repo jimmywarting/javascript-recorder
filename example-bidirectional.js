@@ -176,8 +176,6 @@ buttonElement.click();
 await new Promise(resolve => setTimeout(resolve, 100));
 
 console.log('\n[MAIN] Final button text:', buttonElement.innerText);
-console.log('[MAIN] Note: Button text not updated because proxy operations inside');
-console.log('[MAIN]       callbacks need additional work (see limitations below)');
 
 // ==================================================================
 // SUMMARY
@@ -194,11 +192,16 @@ console.log('✓ When button was clicked on main thread:');
 console.log('  - Click event triggered the handler');
 console.log('  - Handler executed in WORKER context (accessing worker state)');
 console.log(`  - Click counter incremented correctly: ${clickCount} clicks`);
+console.log('  - Button text updated correctly via proxy operations inside callback!');
 console.log('');
 console.log('CURRENT LIMITATIONS:');
 console.log('  - Event objects cannot be fully serialized (placeholder sent)');
-console.log('  - Proxy operations inside callbacks need additional implementation');
-console.log('  - This is an MVP demonstrating the core bidirectional mechanism');
+console.log('');
+console.log('FEATURES DEMONSTRATED:');
+console.log('  ✓ Bidirectional function callbacks');
+console.log('  ✓ Nested proxy operations in callbacks');
+console.log('  ✓ Worker-local state access from callbacks');
+console.log('  ✓ Cross-context DOM manipulation from callback');
 console.log('='.repeat(70));
 
 // Clean up

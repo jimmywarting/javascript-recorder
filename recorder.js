@@ -25,6 +25,9 @@ class Recorder {
     // Pending transferables to be sent with next operations batch
     this.pendingTransferables = [];
     
+    // Persistent object map for replay - maintains object references across operation batches
+    this.replayObjectMap = new Map();
+    
     // Set up FinalizationRegistry for automatic cleanup when objects are garbage collected
     if (this.useFinalization && typeof FinalizationRegistry !== 'undefined') {
       this.finalizationRegistry = new FinalizationRegistry((objectId) => {
@@ -39,6 +42,11 @@ class Recorder {
     } else {
       this.finalizationRegistry = null;
       this.channelFinalizationRegistry = null;
+    }
+    
+    // Initialize replayObjectMap with the replay context if provided
+    if (this.replayContext) {
+      this.replayObjectMap.set('globalThis', this.replayContext);
     }
     
     // If port is provided, set up message handler for receiving replay commands
@@ -114,6 +122,9 @@ class Recorder {
    */
   setReplayContext(context) {
     this.replayContext = context;
+    // Reset the object map when replay context changes
+    this.replayObjectMap = new Map();
+    this.replayObjectMap.set('globalThis', context);
   }
 
   /**
@@ -147,8 +158,13 @@ class Recorder {
    */
   _replayRecordings(recordings, context) {
     const results = [];
-    const objectMap = new Map();
-    objectMap.set('globalThis', context);
+    // Use persistent objectMap to maintain object references across batches
+    const objectMap = this.replayObjectMap;
+    
+    // Ensure globalThis is set (in case objectMap was cleared or not initialized)
+    if (!objectMap.has('globalThis')) {
+      objectMap.set('globalThis', context);
+    }
 
     for (const operation of recordings) {
       try {
