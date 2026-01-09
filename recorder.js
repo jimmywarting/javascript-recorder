@@ -14,6 +14,16 @@ class Recorder {
     this.objectRegistry = new Map(); // Store actual objects for reference tracking
     this.useFinalization = options.useFinalization ?? true; // Enable finalization by default
     this.debug = options.debug ?? false; // Debug logging for finalization
+    this.onerror = options.onerror || null; // Error handler callback
+    
+    // WeakMap to track functions to their MessageChannels (for reuse)
+    this.functionChannels = new WeakMap();
+    
+    // Map to store MessageChannels for cleanup (weak references via FinalizationRegistry)
+    this.activeChannels = new Map(); // channelId -> { port1, port2 }
+    
+    // Pending transferables to be sent with next operations batch
+    this.pendingTransferables = [];
     
     // Set up FinalizationRegistry for automatic cleanup when objects are garbage collected
     if (this.useFinalization && typeof FinalizationRegistry !== 'undefined') {
@@ -21,14 +31,20 @@ class Recorder {
         // Called when a proxy is garbage collected
         this._handleFinalization(objectId);
       });
+      
+      // FinalizationRegistry for MessageChannel cleanup when functions are GC'd
+      this.channelFinalizationRegistry = new FinalizationRegistry((channelId) => {
+        this._cleanupChannel(channelId);
+      });
     } else {
       this.finalizationRegistry = null;
+      this.channelFinalizationRegistry = null;
     }
     
     // If port is provided, set up message handler for receiving replay commands
     if (this.port) {
       this.port.onmessage = (event) => {
-        this._handlePortMessage(event.data);
+        this._handlePortMessage(event.data, event);
       };
       this.port.start();
     }
@@ -154,10 +170,23 @@ class Recorder {
   _replayOperation(operation, context, objectMap) {
     const { type, target, property, args, receiver, constructorName, value, resultId } = operation;
 
-    // Helper to resolve arguments that might be object references
+    // Helper to resolve arguments that might be object references or function channels
     const resolveArgs = (args) => {
       if (!args) return args;
       return args.map(arg => {
+        // Check if this is a function channel
+        if (arg && typeof arg === 'object' && arg.__functionChannel) {
+          // Create a wrapper function that sends messages through the channel
+          return this._createFunctionFromChannel(arg.__functionChannel, objectMap);
+        }
+        
+        // Check if this is a transferable stream marker
+        if (arg && typeof arg === 'object' && arg.__transferableStream) {
+          // The stream was transferred, it should be in the MessageEvent ports
+          // For now, return undefined as we'll need to handle this differently
+          return undefined;
+        }
+        
         // Check if this argument is a recorded object ID marker
         if (arg && typeof arg === 'object' && arg.__recordedObjectId) {
           return objectMap.get(arg.__recordedObjectId);
@@ -166,10 +195,19 @@ class Recorder {
       });
     };
 
-    // Helper to resolve a value that might be an object reference
+    // Helper to resolve a value that might be an object reference or function channel
     const resolveValue = (val) => {
-      if (val && typeof val === 'object' && val.__recordedObjectId) {
-        return objectMap.get(val.__recordedObjectId);
+      if (val && typeof val === 'object') {
+        if (val.__functionChannel) {
+          return this._createFunctionFromChannel(val.__functionChannel, objectMap);
+        }
+        if (val.__transferableStream) {
+          // The stream was transferred
+          return undefined;
+        }
+        if (val.__recordedObjectId) {
+          return objectMap.get(val.__recordedObjectId);
+        }
       }
       return val;
     };
@@ -180,6 +218,8 @@ class Recorder {
         const result = obj[property];
         if (resultId && result !== undefined && result !== null) {
           objectMap.set(resultId, result);
+          // Store in registry for evaluate()
+          this.objectRegistry.set(resultId, result);
         }
         return result;
       }
@@ -198,6 +238,8 @@ class Recorder {
         const result = fn.apply(thisArg, resolvedArgs);
         if (resultId && result !== undefined && result !== null) {
           objectMap.set(resultId, result);
+          // Store in registry for evaluate()
+          this.objectRegistry.set(resultId, result);
         }
         return result;
       }
@@ -208,6 +250,8 @@ class Recorder {
         const result = new Constructor(...resolvedArgs);
         if (resultId && result !== undefined && result !== null) {
           objectMap.set(resultId, result);
+          // Store in registry for evaluate()
+          this.objectRegistry.set(resultId, result);
         }
         return result;
       }
@@ -215,6 +259,39 @@ class Recorder {
       default:
         throw new Error(`Unknown operation type: ${type}`);
     }
+  }
+
+  /**
+   * Create a function wrapper that communicates through a MessageChannel
+   * @private
+   */
+  _createFunctionFromChannel(channelId, objectMap) {
+    // Return a function that sends calls through the channel
+    return (...args) => {
+      // Get the channel info
+      const channelInfo = this.objectRegistry.get(channelId);
+      if (!channelInfo || !channelInfo.port) {
+        console.warn(`[Recorder] Function channel ${channelId} not found`);
+        return;
+      }
+      
+      // Serialize arguments - replace objects in objectMap with their IDs
+      const serializedArgs = args.map(arg => {
+        // Check if this is an object from the replay context
+        for (const [id, obj] of objectMap.entries()) {
+          if (obj === arg) {
+            return { __recordedObjectId: id };
+          }
+        }
+        return arg;
+      });
+      
+      // Send the function call
+      channelInfo.port.postMessage({
+        args: serializedArgs,
+        callId: Math.random().toString(36)
+      });
+    };
   }
 
   /**
@@ -228,19 +305,22 @@ class Recorder {
 
     const recordingsToSend = [...this.recordings];
     this.recordings = []; // Clear after copying
+    
+    const transferablesToSend = [...this.pendingTransferables];
+    this.pendingTransferables = []; // Clear after copying
 
-    // Send operations through the port
+    // Send operations through the port with transferables
     this.port.postMessage({
       type: 'replay',
       operations: recordingsToSend
-    });
+    }, transferablesToSend);
   }
 
   /**
    * Handle messages received via MessagePort
    * @private
    */
-  _handlePortMessage(data) {
+  _handlePortMessage(data, event) {
     if (!data || typeof data !== 'object') {
       console.warn('[Recorder] Invalid message received via MessagePort:', data);
       return;
@@ -252,8 +332,44 @@ class Recorder {
         return;
       }
       if (this.replayContext) {
+        // Extract any transferred ports from the event
+        const transferredPorts = event.ports || [];
+        
+        // Process operations to map function channels and streams to transferred ports
+        let portIndex = 0;
+        data.operations.forEach(op => {
+          if (op.type === 'set' && op.value && typeof op.value === 'object') {
+            if (op.value.__functionChannel) {
+              // Map the channel ID to the transferred port
+              if (portIndex < transferredPorts.length) {
+                this.objectRegistry.set(op.value.__functionChannel, {
+                  port: transferredPorts[portIndex++]
+                });
+              }
+            }
+          } else if (op.type === 'apply' && Array.isArray(op.args)) {
+            op.args.forEach(arg => {
+              if (arg && typeof arg === 'object' && arg.__functionChannel) {
+                if (portIndex < transferredPorts.length) {
+                  this.objectRegistry.set(arg.__functionChannel, {
+                    port: transferredPorts[portIndex++]
+                  });
+                }
+              }
+            });
+          }
+        });
+        
         // Replay operations received from the other context
-        this._replayRecordings(data.operations, this.replayContext);
+        try {
+          this._replayRecordings(data.operations, this.replayContext);
+        } catch (error) {
+          if (this.onerror) {
+            this.onerror(error);
+          } else {
+            console.error('[Recorder] Error during replay:', error);
+          }
+        }
       }
     } else if (data.type === 'refCount') {
       if (typeof data.objectId !== 'string') {
@@ -266,6 +382,18 @@ class Recorder {
       }
       // Handle reference count updates
       this._updateRefCount(data.objectId, data.delta);
+    } else if (data.type === 'callFunction') {
+      // Handle function call from the other context
+      this._handleFunctionCall(data);
+    } else if (data.type === 'registerFunction') {
+      // Handle function registration from the other context
+      this._handleFunctionRegistration(data, event);
+    } else if (data.type === 'evaluate') {
+      // Handle evaluate request
+      this._handleEvaluateRequest(data);
+    } else if (data.type === 'proxyGet') {
+      // Handle proxy property access
+      this._handleProxyGet(data);
     } else {
       console.warn('[Recorder] Unknown message type:', data.type);
     }
@@ -327,6 +455,141 @@ class Recorder {
         delta: -1
       });
     }
+  }
+
+  /**
+   * Clean up a MessageChannel
+   * @private
+   */
+  _cleanupChannel(channelId) {
+    const channel = this.activeChannels.get(channelId);
+    if (channel) {
+      channel.port1?.close();
+      channel.port2?.close();
+      this.activeChannels.delete(channelId);
+      if (this.debug) {
+        console.log(`[Recorder] Cleaned up MessageChannel ${channelId}`);
+      }
+    }
+  }
+
+  /**
+   * Handle function call from the other context
+   * @private
+   */
+  _handleFunctionCall(data) {
+    // This is handled by the MessageChannel port directly
+    // No action needed in the recorder itself
+  }
+
+  /**
+   * Handle function registration from the other context
+   * @private
+   */
+  _handleFunctionRegistration(data, event) {
+    if (!this.replayContext) return;
+    
+    const { functionId, targetId, property, port } = data;
+    
+    // Store the port for later use
+    if (!this.objectRegistry.has(functionId)) {
+      this.objectRegistry.set(functionId, { port, targetId, property });
+    }
+  }
+
+  /**
+   * Handle evaluate request from the other context
+   * @private
+   */
+  _handleEvaluateRequest(data) {
+    const { objectId, responsePort } = data;
+    
+    if (!this.replayContext) {
+      responsePort?.postMessage({ error: 'No replay context available' });
+      return;
+    }
+    
+    // Find the object in the object map
+    const obj = this.objectRegistry.get(objectId);
+    
+    if (!obj) {
+      responsePort?.postMessage({ error: `Object ${objectId} not found` });
+      return;
+    }
+    
+    try {
+      // Send the actual object back
+      responsePort?.postMessage({ result: obj });
+    } catch (error) {
+      responsePort?.postMessage({ error: error.message });
+    }
+  }
+
+  /**
+   * Handle proxy property get from the other context
+   * @private
+   */
+  _handleProxyGet(data) {
+    const { objectId, property, responsePort } = data;
+    
+    if (!this.replayContext) {
+      responsePort?.postMessage({ error: 'No replay context available' });
+      return;
+    }
+    
+    const obj = this.objectRegistry.get(objectId);
+    
+    if (!obj) {
+      responsePort?.postMessage({ error: `Object ${objectId} not found` });
+      return;
+    }
+    
+    try {
+      const value = obj[property];
+      responsePort?.postMessage({ result: value });
+    } catch (error) {
+      responsePort?.postMessage({ error: error.message });
+    }
+  }
+
+  /**
+   * Evaluate a proxy reference to get its actual value
+   * @param {Object} proxyRef - The proxy reference with __recordedObjectId
+   * @returns {Promise<any>} The actual value from the other context
+   */
+  async evaluate(proxyRef) {
+    if (!this.port) {
+      throw new Error('Cannot evaluate: no MessagePort configured');
+    }
+    
+    // Extract objectId from proxy reference
+    const objectId = proxyRef?.__recordedObjectId;
+    if (!objectId) {
+      throw new Error('Invalid proxy reference: missing __recordedObjectId');
+    }
+    
+    // Create a new MessageChannel for this evaluation
+    const channel = new MessageChannel();
+    
+    return new Promise((resolve, reject) => {
+      channel.port1.onmessage = (event) => {
+        channel.port1.close();
+        channel.port2.close();
+        
+        if (event.data.error) {
+          reject(new Error(event.data.error));
+        } else {
+          resolve(event.data.result);
+        }
+      };
+      
+      // Send evaluate request with response port
+      this.port.postMessage({
+        type: 'evaluate',
+        objectId,
+        responsePort: channel.port2
+      }, [channel.port2]);
+    });
   }
 
   /**
@@ -412,21 +675,177 @@ function createRecordHandler(recorder, targetId = 'globalThis', sharedObjectIds 
     return objectIds.get(obj);
   }
 
+  // Helper to check if value is a stream that should be transferred
+  function isTransferableStream(value) {
+    if (typeof ReadableStream !== 'undefined' && value instanceof ReadableStream) {
+      return true;
+    }
+    if (typeof WritableStream !== 'undefined' && value instanceof WritableStream) {
+      return true;
+    }
+    if (typeof TransformStream !== 'undefined' && value instanceof TransformStream) {
+      return true;
+    }
+    return false;
+  }
+
+  // Helper to check if value can be structured cloned
+  function isStructuredCloneable(value) {
+    if (value === null || value === undefined) return true;
+    if (typeof value === 'symbol') return false;
+    
+    const type = typeof value;
+    if (type === 'string' || type === 'number' || type === 'boolean' || type === 'bigint') {
+      return true;
+    }
+    
+    // Check for known structured cloneable types
+    if (value instanceof Date || value instanceof RegExp) return true;
+    if (value instanceof Map || value instanceof Set) return true;
+    if (value instanceof ArrayBuffer || ArrayBuffer.isView(value)) return true;
+    if (value instanceof Blob || value instanceof File) return true;
+    if (typeof ImageData !== 'undefined' && value instanceof ImageData) return true;
+    
+    // Plain objects and arrays are cloneable
+    if (Array.isArray(value)) return true;
+    if (Object.getPrototypeOf(value) === Object.prototype) return true;
+    
+    return false;
+  }
+
+  // Helper to create or reuse a MessageChannel for a function
+  function getOrCreateFunctionChannel(fn) {
+    // Check if we already have a channel for this function
+    let channelInfo = recorder.functionChannels.get(fn);
+    
+    if (!channelInfo) {
+      // Create a new MessageChannel for this function
+      const channel = new MessageChannel();
+      const channelId = `channel_${counter.value++}`;
+      
+      // Set up listener on port1 to execute the function when called
+      channel.port1.onmessage = (event) => {
+        const { args, callId, responsePort } = event.data;
+        
+        try {
+          // Deserialize arguments - create proxy references for recorded objects
+          const deserializedArgs = args.map(arg => {
+            if (arg && typeof arg === 'object' && arg.__recordedObjectId) {
+              // Return a proxy reference that can be used in this context
+              return createProxyReferenceForCallback(arg.__recordedObjectId);
+            }
+            return arg;
+          });
+          
+          // Call the function
+          const result = fn(...deserializedArgs);
+          
+          // Send result back if responsePort provided
+          if (responsePort) {
+            responsePort.postMessage({ callId, result });
+          }
+        } catch (error) {
+          if (responsePort) {
+            responsePort.postMessage({ callId, error: error.message });
+          } else if (recorder.onerror) {
+            recorder.onerror(error);
+          }
+        }
+      };
+      
+      channelInfo = {
+        port2: channel.port2,
+        channelId
+      };
+      
+      // Store the channel for reuse
+      recorder.functionChannels.set(fn, channelInfo);
+      recorder.activeChannels.set(channelId, { port1: channel.port1, port2: channel.port2 });
+      
+      // Register for cleanup when function is GC'd
+      if (recorder.channelFinalizationRegistry) {
+        recorder.channelFinalizationRegistry.register(fn, channelId, fn);
+      }
+    }
+    
+    return channelInfo;
+  }
+
+  // Create a proxy reference for an object passed to a callback
+  function createProxyReferenceForCallback(objectId) {
+    // Create a proxy that records operations on the object from the other context
+    const proxyHandler = {
+      get(target, property) {
+        if (property === '__recordedObjectId') {
+          return objectId;
+        }
+        
+        // For now, return a simple proxy that tracks the property access
+        const resultId = `obj_${counter.value++}`;
+        
+        recorder.record({
+          type: 'get',
+          target: objectId,
+          property: String(property),
+          resultId: resultId
+        });
+        
+        return createDummyObject(resultId);
+      },
+      
+      set(target, property, value) {
+        const serializedValue = (value && typeof value === 'object' && getObjectId(value))
+          ? { __recordedObjectId: getObjectId(value) }
+          : value;
+        
+        recorder.record({
+          type: 'set',
+          target: objectId,
+          property: String(property),
+          value: serializedValue
+        });
+        
+        return true;
+      }
+    };
+    
+    const proxy = new Proxy({}, proxyHandler);
+    objectIds.set(proxy, objectId);
+    return proxy;
+  }
+
   // Serialize arguments, converting proxy objects to their IDs
   function serializeArgs(args) {
     return args.map(arg => {
+      // Check if this is a recorded object/proxy first (including function proxies)
       if (arg && typeof arg === 'object') {
         const id = getObjectId(arg);
         if (id) {
           return { __recordedObjectId: id };
         }
       }
-      if (arg && typeof arg === 'function') {
+      
+      // Check if this is a proxy function
+      if (typeof arg === 'function') {
         const id = getObjectId(arg);
         if (id) {
+          // This is a proxy function, not a real callback
           return { __recordedObjectId: id };
         }
+        
+        // This is a real user function - create MessageChannel
+        const channelInfo = getOrCreateFunctionChannel(arg);
+        // Add port to transferables
+        recorder.pendingTransferables.push(channelInfo.port2);
+        return { __functionChannel: channelInfo.channelId };
       }
+      
+      // Handle streams - mark for transfer
+      if (isTransferableStream(arg)) {
+        recorder.pendingTransferables.push(arg);
+        return { __transferableStream: true };
+      }
+      
       return arg;
     });
   }
@@ -509,6 +928,39 @@ function createRecordHandler(recorder, targetId = 'globalThis', sharedObjectIds 
     },
 
     set(target, property, value, receiver) {
+      // Handle function assignments
+      if (typeof value === 'function') {
+        const channelInfo = getOrCreateFunctionChannel(value);
+        
+        // Record the set operation with function channel info
+        recorder.record({
+          type: 'set',
+          target: targetId,
+          property: String(property),
+          value: { __functionChannel: channelInfo.channelId },
+          receiver: getObjectId(receiver)
+        });
+        
+        // Add port to transferables
+        recorder.pendingTransferables.push(channelInfo.port2);
+        
+        return true;
+      }
+      
+      // Handle streams - mark for transfer
+      if (isTransferableStream(value)) {
+        recorder.record({
+          type: 'set',
+          target: targetId,
+          property: String(property),
+          value: { __transferableStream: true },
+          receiver: getObjectId(receiver)
+        });
+        
+        recorder.pendingTransferables.push(value);
+        return true;
+      }
+      
       // Serialize value if it's a recorded object
       const serializedValue = (value && typeof value === 'object' && getObjectId(value))
         ? { __recordedObjectId: getObjectId(value) }
