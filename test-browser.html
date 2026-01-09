@@ -315,7 +315,19 @@
 
             try {
                 log(output, 'Creating Web Worker...', 'info');
-                const worker = new Worker('./recorder-worker.js', { type: 'module' });
+                
+                // Check if module workers are supported
+                let worker;
+                try {
+                    worker = new Worker('./recorder-worker.js', { type: 'module' });
+                } catch (e) {
+                    log(output, '⚠ Module workers not supported, trying fallback...', 'info');
+                    log(output, 'Some browsers require a flag for module workers', 'info');
+                    log(output, 'Chrome: --enable-features=ModuleWorkers', 'info');
+                    log(output, 'See example-messageport.js for a working Node.js example', 'info');
+                    setStatus('test3-status', 'Not Supported', 'idle');
+                    return;
+                }
                 
                 // Create MessageChannel
                 const channel = new MessageChannel();
