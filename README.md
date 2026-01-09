@@ -143,25 +143,40 @@ self.onmessage = (event) => {
 ### Using Symbol.dispose for Automatic Cleanup
 
 ```javascript
-import { Recorder, createRecordedObject } from './recorder.js';
+import { Recorder, createRecordHandler } from './recorder.js';
 
 const recorder = new Recorder({ autoReplay: false });
+const handler = createRecordHandler(recorder);
+const proxiedWindow = new Proxy({}, handler);
 
-// Using the `using` keyword (when supported)
+// Using the `using` keyword for automatic disposal (when supported)
 {
-  using handle = createRecordedObject(recorder);
-  const proxied = handle.value;
+  using ref = proxiedWindow.document.createElement('div');
+  proxiedWindow.document.body.append(ref);
   
-  proxied.someOperation();
-  
-  // handle is automatically disposed when exiting the block
+  // ref is automatically disposed when exiting the block
   // This decrements reference counts for proper cleanup
 }
 
-// Manual disposal
-const handle = createRecordedObject(recorder);
-// ... use handle.value ...
-handle[Symbol.dispose](); // Manually clean up
+// Without `using`, objects rely on FinalizationRegistry for cleanup
+// (non-deterministic, happens during garbage collection)
+const div = proxiedWindow.document.createElement('span');
+// div will be cleaned up eventually when garbage collected
+```
+
+### FinalizationRegistry for Automatic Cleanup
+
+```javascript
+const recorder = new Recorder({ 
+  autoReplay: false,
+  useFinalization: true  // Enable automatic cleanup (default: true)
+});
+
+// Objects are automatically tracked with FinalizationRegistry
+// When they are garbage collected, ref counts are decremented
+
+// Best practice: Use `using` keyword for deterministic cleanup
+// FinalizationRegistry provides a safety net if you forget
 ```
 
 ## API
@@ -174,9 +189,10 @@ The main recorder class that stores all recorded operations.
 
 ```javascript
 new Recorder({
-  replayContext: null,  // Context for automatic replay (default: null)
-  autoReplay: true,     // Enable automatic replay on microtask (default: true)
-  port: null            // MessagePort for cross-context communication (default: null)
+  replayContext: null,     // Context for automatic replay (default: null)
+  autoReplay: true,        // Enable automatic replay on microtask (default: true)
+  port: null,              // MessagePort for cross-context communication (default: null)
+  useFinalization: true    // Enable FinalizationRegistry for automatic cleanup (default: true)
 })
 ```
 
@@ -191,6 +207,8 @@ new Recorder({
 - `replay(context)` - Manually replay recorded operations in a given context
 - `incrementRefCount(objectId)` - Increment reference count for an object
 - `decrementRefCount(objectId)` - Decrement reference count for an object
+- `registerForFinalization(proxy, objectId)` - Register a proxy for automatic cleanup
+- `unregisterFromFinalization(proxy)` - Unregister a proxy from automatic cleanup
 - `[Symbol.dispose]()` - Dispose of the recorder and clean up resources
 
 ### `createRecordedObject(recorder, target)`
@@ -263,6 +281,8 @@ See the example files for complete working examples:
 - `example-no-exec.js` - Demonstrates non-executing recording with automatic replay
 - `example-messageport.js` - Shows MessagePort-based cross-context communication
 - `example-dispose.js` - Demonstrates Symbol.dispose and reference counting
+- `example-using.js` - Shows correct usage of `using` keyword with proxies
+- `example-finalization.js` - Demonstrates FinalizationRegistry for automatic cleanup
 - `example-rtc.js` - Shows the RTCPeerConnection use case
 - `example.js` - General usage examples
 - `test-browser.html` - Interactive browser tests with real DOM APIs
@@ -272,7 +292,8 @@ Run Node.js examples:
 
 ```bash
 node example-messageport.js
-node example-dispose.js
+node example-using.js
+node --expose-gc example-finalization.js  # Requires --expose-gc flag
 ```
 
 Run browser tests:
