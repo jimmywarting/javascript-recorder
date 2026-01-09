@@ -77,37 +77,39 @@ console.log('\n--- Triggering Garbage Collection ---\n');
 console.log('Attempting to trigger GC...');
 console.log('Note: GC is non-deterministic and finalizers may not run immediately');
 
-// Try to trigger garbage collection (this is a hint, not guaranteed)
-if (global.gc) {
-  console.log('Running global.gc()...');
-  global.gc();
-  
-  // Wait a bit for finalization to potentially occur
-  await new Promise(resolve => setTimeout(resolve, 100));
-  
-  console.log(`Ref count after GC attempt: ${recorder.objectRefCounts.get(lastId) || 0}`);
-  console.log('(If 0, finalization occurred; if >0, GC hasn\'t run yet)');
-} else {
-  console.log('⚠ global.gc() not available');
-  console.log('  Run with: node --expose-gc example-finalization.js');
-  console.log('  Without gc(), finalizers will run eventually but timing is unpredictable');
-}
+(async () => {
+  // Try to trigger garbage collection (this is a hint, not guaranteed)
+  if (global.gc) {
+    console.log('Running global.gc()...');
+    global.gc();
+    
+    // Wait a bit for finalization to potentially occur
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
+    console.log(`Ref count after GC attempt: ${recorder.objectRefCounts.get(lastId) || 0}`);
+    console.log('(If 0, finalization occurred; if >0, GC hasn\'t run yet)');
+  } else {
+    console.log('⚠ global.gc() not available');
+    console.log('  Run with: node --expose-gc example-finalization.js');
+    console.log('  Without gc(), finalizers will run eventually but timing is unpredictable');
+  }
 
-console.log('\n--- Summary ---\n');
+  console.log('\n--- Summary ---\n');
 
-console.log('✓ Symbol.dispose: Immediate, deterministic cleanup (when used with `using`)');
-console.log('✓ FinalizationRegistry: Automatic, non-deterministic cleanup (fallback)');
-console.log('✓ Best practice: Use `using` keyword for explicit disposal when possible');
-console.log('✓ Finalization provides safety net if user forgets to dispose');
+  console.log('✓ Symbol.dispose: Immediate, deterministic cleanup (when used with `using`)');
+  console.log('✓ FinalizationRegistry: Automatic, non-deterministic cleanup (fallback)');
+  console.log('✓ Best practice: Use `using` keyword for explicit disposal when possible');
+  console.log('✓ Finalization provides safety net if user forgets to dispose');
 
-console.log('\n--- Reference Count Summary ---\n');
-console.log('Total objects tracked:', recorder.objectRefCounts.size);
-console.log('Reference counts:');
-for (const [objId, count] of recorder.objectRefCounts.entries()) {
-  console.log(`  ${objId}: ${count}`);
-}
+  console.log('\n--- Reference Count Summary ---\n');
+  console.log('Total objects tracked:', recorder.objectRefCounts.size);
+  console.log('Reference counts:');
+  for (const [objId, count] of recorder.objectRefCounts.entries()) {
+    console.log(`  ${objId}: ${count}`);
+  }
 
-console.log('\n' + '='.repeat(60));
-console.log('Finalization Registry provides automatic cleanup as a fallback');
-console.log('but manual disposal with `using` keyword is more predictable.');
-console.log('='.repeat(60));
+  console.log('\n' + '='.repeat(60));
+  console.log('Finalization Registry provides automatic cleanup as a fallback');
+  console.log('but manual disposal with `using` keyword is more predictable.');
+  console.log('='.repeat(60));
+})();

@@ -189,11 +189,19 @@ The main recorder class that stores all recorded operations.
 
 ```javascript
 new Recorder({
-  replayContext: null,     // Context for automatic replay (default: null)
-  autoReplay: true,        // Enable automatic replay on microtask (default: true)
-  port: null,              // MessagePort for cross-context communication (default: null)
-  useFinalization: true    // Enable FinalizationRegistry for automatic cleanup (default: true)
+  replayContext: null,        // Context for automatic replay (default: null)
+  autoReplay: true,           // Enable automatic replay on microtask (default: true)
+  port: null,                 // MessagePort for cross-context communication (default: null)
+  useFinalization: true,      // Enable FinalizationRegistry for automatic cleanup (default: true)
+  debug: false                // Enable debug logging for finalization (default: false)
 })
+```
+
+**Note on reference counting**: When `Symbol.dispose` is available, all created proxies are tracked with reference counts. This allows:
+- Manual cleanup via `using` keyword (deterministic)
+- Automatic cleanup via FinalizationRegistry when garbage collected (fallback)
+
+This prevents memory leaks in long-running applications where proxies might not be explicitly disposed.
 ```
 
 #### Methods
