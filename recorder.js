@@ -166,7 +166,8 @@ class Recorder {
    */
   _replayRecordings(recordings, context) {
     const results = [];
-    // Use persistent objectMap to maintain object references across batches
+    // Use the persistent objectMap to maintain object references across operation batches
+    // This is critical for nested operations in callbacks to reference objects from earlier batches
     const objectMap = this.replayObjectMap;
     
     // Ensure globalThis is set (in case objectMap was cleared or not initialized)
