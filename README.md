@@ -99,6 +99,71 @@ recorder.replay(realWindow);
 // Now the operations execute in the real context
 ```
 
+### Cross-Context Communication with MessagePort
+
+```javascript
+// window.js (Main Thread)
+import { Recorder, createRecordHandler } from './recorder.js';
+
+const messageChannel = new MessageChannel();
+const port1 = messageChannel.port1; // For receiving operations
+const port2 = messageChannel.port2; // Send to worker
+
+// Set up recorder to receive and replay operations
+const recorder = new Recorder({
+  port: port1,
+  replayContext: window,
+  autoReplay: true
+});
+
+// Send port2 to worker
+worker.postMessage({ port: port2 }, [port2]);
+
+// worker.js (Worker Thread)
+// Receive port from main thread
+self.onmessage = (event) => {
+  const port = event.data.port;
+  
+  // Create recorder that sends operations through the port
+  const recorder = new Recorder({
+    port: port,
+    autoReplay: true
+  });
+  
+  const handler = createRecordHandler(recorder);
+  const proxiedWindow = new Proxy({}, handler);
+  
+  // Record operations - they'll be sent to main thread and executed there
+  const ref = proxiedWindow.document.createElement('div');
+  proxiedWindow.document.body.append(ref);
+  // Operations are sent through MessagePort and replayed on main thread!
+};
+```
+
+### Using Symbol.dispose for Automatic Cleanup
+
+```javascript
+import { Recorder, createRecordedObject } from './recorder.js';
+
+const recorder = new Recorder({ autoReplay: false });
+
+// Using the `using` keyword (when supported)
+{
+  using handle = createRecordedObject(recorder);
+  const proxied = handle.value;
+  
+  proxied.someOperation();
+  
+  // handle is automatically disposed when exiting the block
+  // This decrements reference counts for proper cleanup
+}
+
+// Manual disposal
+const handle = createRecordedObject(recorder);
+// ... use handle.value ...
+handle[Symbol.dispose](); // Manually clean up
+```
+
 ## API
 
 ### `Recorder`
@@ -110,7 +175,8 @@ The main recorder class that stores all recorded operations.
 ```javascript
 new Recorder({
   replayContext: null,  // Context for automatic replay (default: null)
-  autoReplay: true      // Enable automatic replay on microtask (default: true)
+  autoReplay: true,     // Enable automatic replay on microtask (default: true)
+  port: null            // MessagePort for cross-context communication (default: null)
 })
 ```
 
@@ -123,18 +189,48 @@ new Recorder({
 - `resume()` - Resume recording
 - `setReplayContext(context)` - Set the context for automatic replay
 - `replay(context)` - Manually replay recorded operations in a given context
+- `incrementRefCount(objectId)` - Increment reference count for an object
+- `decrementRefCount(objectId)` - Decrement reference count for an object
+- `[Symbol.dispose]()` - Dispose of the recorder and clean up resources
 
-### `createRecordHandler(recorder, targetId, sharedObjectIds, sharedCounter)`
+### `createRecordedObject(recorder, target)`
 
-Creates a Proxy handler that records all operations without executing them.
+Creates a recorded object handle that supports the `using` keyword and Symbol.dispose.
 
 **Parameters:**
 - `recorder` - A `Recorder` instance
-- `targetId` - (Optional) A unique identifier for the target object
-- `sharedObjectIds` - (Internal) Shared WeakMap for tracking objects
-- `sharedCounter` - (Internal) Shared counter for generating IDs
+- `target` - (Optional) The target to wrap
 
-**Returns:** A Proxy handler object
+**Returns:** A `RecordedObjectHandle` that supports automatic cleanup
+
+### `RecordedObjectHandle`
+
+A wrapper class that provides automatic reference counting with Symbol.dispose support.
+
+**Properties:**
+- `value` - The proxied object
+
+**Methods:**
+- `[Symbol.dispose]()` - Automatically decrements reference counts
+
+## Browser Testing
+
+Open `test-browser.html` in a web browser to run interactive tests:
+
+```bash
+# Serve the files with a local web server
+python3 -m http.server 8000
+# or
+npx serve .
+```
+
+Then open `http://localhost:8000/test-browser.html` in your browser.
+
+The browser test page includes:
+- Basic DOM recording and replay
+- MessagePort communication simulation
+- Real Web Worker integration
+- Complex DOM operations
 
 ## Recording Format
 
@@ -165,13 +261,26 @@ This allows the replay system to properly resolve object relationships.
 See the example files for complete working examples:
 
 - `example-no-exec.js` - Demonstrates non-executing recording with automatic replay
+- `example-messageport.js` - Shows MessagePort-based cross-context communication
+- `example-dispose.js` - Demonstrates Symbol.dispose and reference counting
 - `example-rtc.js` - Shows the RTCPeerConnection use case
 - `example.js` - General usage examples
+- `test-browser.html` - Interactive browser tests with real DOM APIs
+- `recorder-worker.js` - Web Worker example for browser testing
 
-Run any example:
+Run Node.js examples:
 
 ```bash
-node example-no-exec.js
+node example-messageport.js
+node example-dispose.js
+```
+
+Run browser tests:
+
+```bash
+# Start a local web server
+python3 -m http.server 8000
+# Open http://localhost:8000/test-browser.html
 ```
 
 ## Testing

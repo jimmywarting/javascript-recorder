@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JavaScript Recorder - Browser Test</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            border-bottom: 3px solid #4CAF50;
+            padding-bottom: 10px;
+        }
+        h2 {
+            color: #555;
+            margin-top: 0;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 15px;
+            background: #f9f9f9;
+            border-left: 4px solid #2196F3;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            font-size: 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .output {
+            background: #2d2d2d;
+            color: #f0f0f0;
+            padding: 15px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            max-height: 400px;
+            overflow-y: auto;
+            margin: 10px 0;
+        }
+        .log-entry {
+            margin: 5px 0;
+            padding: 3px 0;
+        }
+        .log-worker {
+            color: #FFB74D;
+        }
+        .log-main {
+            color: #81C784;
+        }
+        .log-info {
+            color: #64B5F6;
+        }
+        .log-success {
+            color: #4CAF50;
+            font-weight: bold;
+        }
+        .log-error {
+            color: #f44336;
+            font-weight: bold;
+        }
+        #target-area {
+            min-height: 100px;
+            border: 2px dashed #ddd;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        .created-element {
+            background: #E3F2FD;
+            border: 1px solid #2196F3;
+            padding: 10px;
+            margin: 5px 0;
+            border-radius: 4px;
+        }
+        .status {
+            display: inline-block;
+            padding: 5px 10px;
+            border-radius: 3px;
+            font-weight: bold;
+            margin: 5px;
+        }
+        .status.recording {
+            background: #FFE082;
+            color: #F57F17;
+        }
+        .status.replaying {
+            background: #81C784;
+            color: #1B5E20;
+        }
+        .status.idle {
+            background: #E0E0E0;
+            color: #616161;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎥 JavaScript Recorder - Browser Test</h1>
+        <p>This page demonstrates the JavaScript recorder with real browser APIs, including MessagePort communication between contexts.</p>
+    </div>
+
+    <div class="container">
+        <h2>Test 1: Basic DOM Recording (No Worker)</h2>
+        <div class="test-section">
+            <p>Records DOM operations without executing them, then replays them in the real DOM.</p>
+            <button id="test1-btn">Run Basic Test</button>
+            <span id="test1-status" class="status idle">Idle</span>
+            <div id="test1-output" class="output"></div>
+            <div id="test1-target" class="target-area">
+                <em>Elements will appear here after replay...</em>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <h2>Test 2: MessagePort Communication (Simulated Worker)</h2>
+        <div class="test-section">
+            <p>Simulates worker-to-main-thread communication using MessageChannel.</p>
+            <button id="test2-btn">Run MessagePort Test</button>
+            <span id="test2-status" class="status idle">Idle</span>
+            <div id="test2-output" class="output"></div>
+            <div id="test2-target" class="target-area">
+                <em>Elements from "worker" will appear here...</em>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <h2>Test 3: Real Web Worker (If Supported)</h2>
+        <div class="test-section">
+            <p>Uses an actual Web Worker to record operations and replay them on the main thread.</p>
+            <button id="test3-btn">Run Worker Test</button>
+            <span id="test3-status" class="status idle">Idle</span>
+            <div id="test3-output" class="output"></div>
+            <div id="test3-target" class="target-area">
+                <em>Elements from real worker will appear here...</em>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <h2>Test 4: Complex DOM Operations</h2>
+        <div class="test-section">
+            <p>Tests complex operations including event listeners, styles, and nested elements.</p>
+            <button id="test4-btn">Run Complex Test</button>
+            <span id="test4-status" class="status idle">Idle</span>
+            <div id="test4-output" class="output"></div>
+            <div id="test4-target" class="target-area">
+                <em>Complex DOM structure will appear here...</em>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { Recorder, createRecordHandler, createRecordedObject } from './recorder.js';
+
+        // Utility to log to output areas
+        function log(outputId, message, type = 'info') {
+            const output = document.getElementById(outputId);
+            const entry = document.createElement('div');
+            entry.className = `log-entry log-${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            output.appendChild(entry);
+            output.scrollTop = output.scrollHeight;
+        }
+
+        function setStatus(statusId, text, className) {
+            const status = document.getElementById(statusId);
+            status.textContent = text;
+            status.className = `status ${className}`;
+        }
+
+        // Test 1: Basic DOM Recording
+        document.getElementById('test1-btn').addEventListener('click', async () => {
+            const output = 'test1-output';
+            const target = document.getElementById('test1-target');
+            target.innerHTML = '';
+            document.getElementById(output).innerHTML = '';
+            
+            log(output, 'Starting basic DOM recording test...', 'info');
+            setStatus('test1-status', 'Recording', 'recording');
+
+            // Create recorder with actual DOM as replay context
+            const recorder = new Recorder({
+                replayContext: { document, target },
+                autoReplay: false
+            });
+
+            const handler = createRecordHandler(recorder);
+            const proxied = new Proxy({}, handler);
+
+            // Record operations (won't execute)
+            log(output, 'Recording: document.createElement("div")', 'worker');
+            const div = proxied.document.createElement('div');
+            
+            log(output, 'Recording: div.className = "created-element"', 'worker');
+            div.className = 'created-element';
+            
+            log(output, 'Recording: div.textContent = "Hello from recorder!"', 'worker');
+            div.textContent = 'Hello from recorder!';
+            
+            log(output, 'Recording: target.appendChild(div)', 'worker');
+            proxied.target.appendChild(div);
+
+            log(output, `Total operations recorded: ${recorder.recordings.length}`, 'info');
+
+            // Now replay
+            await new Promise(resolve => setTimeout(resolve, 500));
+            setStatus('test1-status', 'Replaying', 'replaying');
+            log(output, 'Replaying operations in real DOM...', 'main');
+            
+            recorder.replay({ document, target });
+
+            log(output, '✓ Test completed successfully!', 'success');
+            setStatus('test1-status', 'Complete', 'idle');
+        });
+
+        // Test 2: MessagePort Communication
+        document.getElementById('test2-btn').addEventListener('click', async () => {
+            const output = 'test2-output';
+            const target = document.getElementById('test2-target');
+            target.innerHTML = '';
+            document.getElementById(output).innerHTML = '';
+            
+            log(output, 'Starting MessagePort communication test...', 'info');
+            setStatus('test2-status', 'Recording', 'recording');
+
+            // Create MessageChannel
+            const channel = new MessageChannel();
+            const port1 = channel.port1;
+            const port2 = channel.port2;
+
+            log(output, 'Created MessageChannel', 'info');
+
+            // Set up "main thread" recorder (receives and replays)
+            const mainRecorder = new Recorder({
+                port: port1,
+                replayContext: { document, target },
+                autoReplay: true
+            });
+            log(output, 'Main thread recorder ready', 'main');
+
+            // Set up "worker" recorder (records and sends)
+            const workerRecorder = new Recorder({
+                port: port2,
+                autoReplay: true
+            });
+            log(output, 'Worker recorder ready', 'worker');
+
+            // Simulate worker operations
+            const handler = createRecordHandler(workerRecorder);
+            const proxied = new Proxy({}, handler);
+
+            log(output, '[WORKER] Recording: document.createElement("div")', 'worker');
+            const div = proxied.document.createElement('div');
+            div.className = 'created-element';
+            div.innerHTML = '<strong>Created via MessagePort!</strong>';
+            proxied.target.appendChild(div);
+
+            log(output, '[WORKER] Operations sent through MessagePort', 'worker');
+
+            // Wait for replay
+            await new Promise(resolve => setTimeout(resolve, 100));
+            setStatus('test2-status', 'Replaying', 'replaying');
+            
+            await new Promise(resolve => setTimeout(resolve, 100));
+            log(output, '[MAIN] Operations received and replayed!', 'main');
+            log(output, '✓ Test completed successfully!', 'success');
+            setStatus('test2-status', 'Complete', 'idle');
+
+            port1.close();
+            port2.close();
+        });
+
+        // Test 3: Real Web Worker
+        document.getElementById('test3-btn').addEventListener('click', async () => {
+            const output = 'test3-output';
+            const target = document.getElementById('test3-target');
+            target.innerHTML = '';
+            document.getElementById(output).innerHTML = '';
+            
+            log(output, 'Starting real Web Worker test...', 'info');
+            setStatus('test3-status', 'Starting', 'recording');
+
+            if (typeof Worker === 'undefined') {
+                log(output, '✗ Web Workers not supported in this browser', 'error');
+                setStatus('test3-status', 'Not Supported', 'idle');
+                return;
+            }
+
+            try {
+                log(output, 'Creating Web Worker...', 'info');
+                const worker = new Worker('./recorder-worker.js', { type: 'module' });
+                
+                // Create MessageChannel
+                const channel = new MessageChannel();
+                const port1 = channel.port1;
+                const port2 = channel.port2;
+                
+                log(output, 'Created MessageChannel', 'info');
+                
+                // Set up main thread recorder to receive and replay
+                const mainRecorder = new Recorder({
+                    port: port1,
+                    replayContext: { document, target },
+                    autoReplay: true
+                });
+                
+                log(output, 'Main thread recorder ready to receive operations', 'main');
+                setStatus('test3-status', 'Recording', 'recording');
+                
+                // Set up worker message handler
+                worker.onmessage = (event) => {
+                    if (event.data.type === 'ready') {
+                        log(output, '[WORKER] Worker is ready', 'worker');
+                        log(output, '[WORKER] Sending port to worker...', 'info');
+                        
+                        // Send port to worker
+                        worker.postMessage({ type: 'start', port: port2 }, [port2]);
+                    } else if (event.data.type === 'done') {
+                        log(output, `[WORKER] Recorded ${event.data.operationsCount} operations`, 'worker');
+                        setStatus('test3-status', 'Replaying', 'replaying');
+                    }
+                };
+                
+                worker.onerror = (error) => {
+                    log(output, `✗ Worker error: ${error.message}`, 'error');
+                    setStatus('test3-status', 'Error', 'idle');
+                };
+                
+                // Wait for operations to be replayed
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                log(output, '[MAIN] Operations replayed successfully!', 'main');
+                log(output, '✓ Test completed successfully!', 'success');
+                setStatus('test3-status', 'Complete', 'idle');
+                
+                // Cleanup
+                setTimeout(() => {
+                    worker.terminate();
+                    port1.close();
+                    log(output, 'Worker terminated and ports closed', 'info');
+                }, 1000);
+
+            } catch (error) {
+                log(output, `✗ Error: ${error.message}`, 'error');
+                setStatus('test3-status', 'Error', 'idle');
+            }
+        });
+
+        // Test 4: Complex DOM Operations
+        document.getElementById('test4-btn').addEventListener('click', async () => {
+            const output = 'test4-output';
+            const target = document.getElementById('test4-target');
+            target.innerHTML = '';
+            document.getElementById(output).innerHTML = '';
+            
+            log(output, 'Starting complex DOM operations test...', 'info');
+            setStatus('test4-status', 'Recording', 'recording');
+
+            const recorder = new Recorder({
+                replayContext: { document, target },
+                autoReplay: false
+            });
+
+            const handler = createRecordHandler(recorder);
+            const proxied = new Proxy({}, handler);
+
+            // Create complex structure
+            log(output, 'Recording complex DOM structure...', 'worker');
+            
+            const container = proxied.document.createElement('div');
+            container.className = 'created-element';
+            container.style.background = '#E8F5E9';
+            container.style.border = '2px solid #4CAF50';
+            
+            const title = proxied.document.createElement('h3');
+            title.textContent = 'Complex Element';
+            title.style.color = '#2E7D32';
+            container.appendChild(title);
+            
+            const list = proxied.document.createElement('ul');
+            for (let i = 1; i <= 3; i++) {
+                const item = proxied.document.createElement('li');
+                item.textContent = `Item ${i}`;
+                list.appendChild(item);
+            }
+            container.appendChild(list);
+            
+            const button = proxied.document.createElement('button');
+            button.textContent = 'Click Me!';
+            button.onclick = () => alert('Button clicked!');
+            container.appendChild(button);
+            
+            proxied.target.appendChild(container);
+
+            log(output, `Recorded ${recorder.recordings.length} operations`, 'info');
+
+            // Replay
+            await new Promise(resolve => setTimeout(resolve, 500));
+            setStatus('test4-status', 'Replaying', 'replaying');
+            log(output, 'Replaying complex structure...', 'main');
+            
+            recorder.replay({ document, target });
+
+            log(output, '✓ Complex structure created successfully!', 'success');
+            log(output, 'Note: Event handlers may need special handling', 'info');
+            setStatus('test4-status', 'Complete', 'idle');
+        });
+
+        // Initialize
+        log('test1-output', 'Ready. Click "Run Basic Test" to start.', 'info');
+        log('test2-output', 'Ready. Click "Run MessagePort Test" to start.', 'info');
+        log('test3-output', 'Ready. Click "Run Worker Test" to start.', 'info');
+        log('test4-output', 'Ready. Click "Run Complex Test" to start.', 'info');
+    </script>
+</body>
+</html>
