@@ -7,7 +7,7 @@ class Recorder {
     this.recordings = [];
     this.recordingEnabled = true;
     this.replayContext = options.replayContext || null;
-    this.autoReplay = options.autoReplay !== false; // Default to true
+    this.autoReplay = options.autoReplay ?? true; // Default to true
     this.replayScheduled = false;
   }
 
