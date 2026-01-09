@@ -229,12 +229,33 @@ class Recorder {
    * @private
    */
   _handlePortMessage(data) {
-    if (data.type === 'replay' && this.replayContext) {
-      // Replay operations received from the other context
-      this._replayRecordings(data.operations, this.replayContext);
+    if (!data || typeof data !== 'object') {
+      console.warn('[Recorder] Invalid message received via MessagePort:', data);
+      return;
+    }
+
+    if (data.type === 'replay') {
+      if (!Array.isArray(data.operations)) {
+        console.warn('[Recorder] Invalid replay message: operations must be an array');
+        return;
+      }
+      if (this.replayContext) {
+        // Replay operations received from the other context
+        this._replayRecordings(data.operations, this.replayContext);
+      }
     } else if (data.type === 'refCount') {
+      if (typeof data.objectId !== 'string') {
+        console.warn('[Recorder] Invalid refCount message: objectId must be a string');
+        return;
+      }
+      if (typeof data.delta !== 'number') {
+        console.warn('[Recorder] Invalid refCount message: delta must be a number');
+        return;
+      }
       // Handle reference count updates
       this._updateRefCount(data.objectId, data.delta);
+    } else {
+      console.warn('[Recorder] Unknown message type:', data.type);
     }
   }
 
@@ -246,7 +267,14 @@ class Recorder {
     const currentCount = this.objectRefCounts.get(objectId) || 0;
     const newCount = currentCount + delta;
 
-    if (newCount <= 0) {
+    if (newCount < 0) {
+      console.warn(`[Recorder] Reference count for ${objectId} would become negative (${newCount}). Setting to 0.`);
+      this.objectRefCounts.delete(objectId);
+      this.objectRegistry.delete(objectId);
+      return;
+    }
+
+    if (newCount === 0) {
       // Clean up object when ref count reaches zero
       this.objectRefCounts.delete(objectId);
       this.objectRegistry.delete(objectId);
