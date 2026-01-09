@@ -12,6 +12,17 @@ class Recorder {
     this.port = options.port || null; // MessagePort for cross-context communication
     this.objectRefCounts = new Map(); // Track reference counts for cross-context objects
     this.objectRegistry = new Map(); // Store actual objects for reference tracking
+    this.useFinalization = options.useFinalization ?? true; // Enable finalization by default
+    
+    // Set up FinalizationRegistry for automatic cleanup when objects are garbage collected
+    if (this.useFinalization && typeof FinalizationRegistry !== 'undefined') {
+      this.finalizationRegistry = new FinalizationRegistry((objectId) => {
+        // Called when a proxy is garbage collected
+        this._handleFinalization(objectId);
+      });
+    } else {
+      this.finalizationRegistry = null;
+    }
     
     // If port is provided, set up message handler for receiving replay commands
     if (this.port) {
@@ -318,6 +329,48 @@ class Recorder {
   }
 
   /**
+   * Handle finalization when a proxy is garbage collected
+   * @private
+   */
+  _handleFinalization(objectId) {
+    // Decrement ref count when object is finalized
+    const currentCount = this.objectRefCounts.get(objectId);
+    if (currentCount !== undefined && currentCount > 0) {
+      console.log(`[Recorder] Finalizing object ${objectId}, ref count: ${currentCount}`);
+      this._updateRefCount(objectId, -1);
+      
+      // Send finalization notification through port if available
+      if (this.port) {
+        this.port.postMessage({
+          type: 'finalize',
+          objectId: objectId
+        });
+      }
+    }
+  }
+
+  /**
+   * Register a proxy for finalization tracking
+   * @param {Object} proxy - The proxy to track
+   * @param {string} objectId - The object identifier
+   */
+  registerForFinalization(proxy, objectId) {
+    if (this.finalizationRegistry) {
+      this.finalizationRegistry.register(proxy, objectId, proxy);
+    }
+  }
+
+  /**
+   * Unregister a proxy from finalization tracking
+   * @param {Object} proxy - The proxy to untrack
+   */
+  unregisterFromFinalization(proxy) {
+    if (this.finalizationRegistry) {
+      this.finalizationRegistry.unregister(proxy);
+    }
+  }
+
+  /**
    * Dispose method for Symbol.dispose support
    */
   [Symbol.dispose]() {
@@ -387,6 +440,39 @@ function createRecordHandler(recorder, targetId = 'globalThis', sharedObjectIds 
     const dummy = function() {}; // Use function as base to support both call and construct
     const proxy = new Proxy(dummy, createRecordHandler(recorder, id, objectIds, counter));
     objectIds.set(proxy, id); // Set ID on the proxy, not the dummy!
+    
+    // Add Symbol.dispose support directly to the proxy
+    // This allows using the proxy with the `using` keyword
+    // When an object is used with `using`, the runtime will access Symbol.dispose
+    if (typeof Symbol.dispose !== 'undefined') {
+      let disposeCalled = false;
+      Object.defineProperty(proxy, Symbol.dispose, {
+        value: function() {
+          // Only decrement if we haven't already
+          if (!disposeCalled && recorder && id) {
+            // Unregister from finalization since we're manually disposing
+            recorder.unregisterFromFinalization(proxy);
+            recorder.decrementRefCount(id);
+            disposeCalled = true;
+          }
+        },
+        enumerable: false,
+        configurable: true
+      });
+      
+      // Increment ref count immediately when proxy is created
+      // This represents the fact that the proxy exists and may be used
+      if (recorder && id) {
+        recorder.incrementRefCount(id);
+      }
+    }
+    
+    // Register proxy with FinalizationRegistry for automatic cleanup
+    // This provides a fallback if the user doesn't manually dispose
+    if (recorder && id) {
+      recorder.registerForFinalization(proxy, id);
+    }
+    
     return proxy;
   }
 
