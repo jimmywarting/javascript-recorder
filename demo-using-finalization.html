@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JavaScript Recorder - Using & Finalization Demo</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .container {
+            background: white;
+            border-radius: 12px;
+            padding: 25px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+        }
+        h1 {
+            color: #333;
+            border-bottom: 4px solid #667eea;
+            padding-bottom: 15px;
+            margin-top: 0;
+        }
+        h2 {
+            color: #555;
+            margin-top: 0;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .emoji {
+            font-size: 1.5em;
+        }
+        .demo-section {
+            margin: 25px 0;
+            padding: 20px;
+            background: #f8f9fa;
+            border-left: 5px solid #667eea;
+            border-radius: 8px;
+        }
+        .demo-section h3 {
+            margin-top: 0;
+            color: #667eea;
+        }
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            font-size: 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            margin: 5px;
+            transition: transform 0.2s, box-shadow 0.2s;
+            font-weight: 600;
+        }
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        button:active {
+            transform: translateY(0);
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .output {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 20px;
+            border-radius: 8px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 14px;
+            max-height: 300px;
+            overflow-y: auto;
+            margin: 15px 0;
+            line-height: 1.6;
+        }
+        .log-entry {
+            margin: 3px 0;
+            padding: 2px 0;
+        }
+        .log-info { color: #4fc3f7; }
+        .log-success { color: #81c784; font-weight: bold; }
+        .log-warning { color: #ffb74d; }
+        .log-error { color: #e57373; font-weight: bold; }
+        .log-dispose { color: #ba68c8; font-weight: bold; }
+        .log-finalize { color: #ff8a65; font-weight: bold; }
+        
+        .demo-area {
+            min-height: 120px;
+            border: 2px dashed #ddd;
+            padding: 20px;
+            margin: 15px 0;
+            border-radius: 8px;
+            background: white;
+        }
+        .created-element {
+            background: linear-gradient(135deg, #e3f2fd 0%, #f3e5f5 100%);
+            border: 2px solid #667eea;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 8px;
+            animation: slideIn 0.3s ease-out;
+        }
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: bold;
+            margin: 0 5px;
+        }
+        .badge-using {
+            background: #ba68c8;
+            color: white;
+        }
+        .badge-disposed {
+            background: #81c784;
+            color: white;
+        }
+        .badge-finalized {
+            background: #ff8a65;
+            color: white;
+        }
+        .info-box {
+            background: #e3f2fd;
+            border-left: 4px solid #2196f3;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 4px;
+        }
+        .warning-box {
+            background: #fff3e0;
+            border-left: 4px solid #ff9800;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 4px;
+        }
+        .ref-count-display {
+            display: inline-block;
+            background: #f5f5f5;
+            padding: 8px 16px;
+            border-radius: 6px;
+            margin: 10px 0;
+            font-family: 'Consolas', 'Monaco', monospace;
+            border: 2px solid #e0e0e0;
+        }
+        .ref-count-label {
+            color: #666;
+            font-weight: bold;
+        }
+        .ref-count-value {
+            color: #667eea;
+            font-weight: bold;
+            font-size: 1.2em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1><span class="emoji">🎯</span> Using Keyword & Finalization Demo</h1>
+        <p>Interactive demonstration of <code>using</code> keyword for automatic disposal and <code>FinalizationRegistry</code> for garbage collection cleanup.</p>
+        
+        <div class="info-box">
+            <strong>💡 Key Concepts:</strong>
+            <ul>
+                <li><strong>using keyword:</strong> Deterministic cleanup when variable goes out of scope</li>
+                <li><strong>FinalizationRegistry:</strong> Automatic cleanup when object is garbage collected (non-deterministic)</li>
+                <li><strong>Reference Counting:</strong> Track how many references exist to an object</li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="container">
+        <h2><span class="emoji">🔄</span> Demo 1: Using Keyword (Deterministic Cleanup)</h2>
+        <div class="demo-section">
+            <h3>Scenario: Create element with `using`, automatically dispose on scope exit</h3>
+            <p>Elements created with <code>using</code> keyword are automatically cleaned up when the block exits.</p>
+            
+            <div class="warning-box">
+                <strong>⚠️ Note:</strong> The <code>using</code> keyword is a Stage 3 proposal. We'll simulate it by manually calling Symbol.dispose.
+            </div>
+            
+            <button id="demo1-btn">Run Demo 1</button>
+            <div id="demo1-output" class="output"></div>
+            <div id="demo1-area" class="demo-area">
+                <em>Elements will appear here...</em>
+            </div>
+            <div id="demo1-refcount"></div>
+        </div>
+    </div>
+
+    <div class="container">
+        <h2><span class="emoji">🗑️</span> Demo 2: Without Using Keyword (Relies on Finalization)</h2>
+        <div class="demo-section">
+            <h3>Scenario: Create elements without disposal, rely on garbage collection</h3>
+            <p>Elements created without <code>using</code> stay in memory until garbage collected.</p>
+            
+            <button id="demo2-create">Create Elements</button>
+            <button id="demo2-gc" disabled>Trigger GC</button>
+            <button id="demo2-check">Check Ref Counts</button>
+            <div id="demo2-output" class="output"></div>
+            <div id="demo2-area" class="demo-area">
+                <em>Elements will appear here...</em>
+            </div>
+            <div id="demo2-refcount"></div>
+        </div>
+    </div>
+
+    <div class="container">
+        <h2><span class="emoji">⚖️</span> Demo 3: Comparison - Using vs No Using</h2>
+        <div class="demo-section">
+            <h3>Side-by-side comparison of deterministic vs non-deterministic cleanup</h3>
+            
+            <button id="demo3-btn">Run Comparison</button>
+            <div id="demo3-output" class="output"></div>
+            
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px;">
+                <div>
+                    <h4 style="color: #ba68c8;">With `using` keyword</h4>
+                    <div id="demo3-using-area" class="demo-area"></div>
+                </div>
+                <div>
+                    <h4 style="color: #ff8a65;">Without `using` keyword</h4>
+                    <div id="demo3-no-using-area" class="demo-area"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <h2><span class="emoji">🔗</span> Demo 4: Reference Counting in Action</h2>
+        <div class="demo-section">
+            <h3>Watch reference counts change as objects are created and disposed</h3>
+            
+            <button id="demo4-create">Create Object</button>
+            <button id="demo4-dispose">Dispose Object</button>
+            <button id="demo4-reset">Reset</button>
+            <div id="demo4-output" class="output"></div>
+            <div id="demo4-refcount"></div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { Recorder, createRecordHandler } from './recorder.js';
+
+        // Utility functions
+        function log(outputId, message, type = 'info') {
+            const output = document.getElementById(outputId);
+            const entry = document.createElement('div');
+            entry.className = `log-entry log-${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            output.appendChild(entry);
+            output.scrollTop = output.scrollHeight;
+        }
+
+        function updateRefCount(elementId, objId, count, recorder) {
+            const element = document.getElementById(elementId);
+            const totalTracked = recorder.objectRefCounts.size;
+            element.innerHTML = `
+                <div class="ref-count-display">
+                    <span class="ref-count-label">Object:</span> <span class="ref-count-value">${objId || 'N/A'}</span>
+                </div>
+                <div class="ref-count-display">
+                    <span class="ref-count-label">Ref Count:</span> <span class="ref-count-value">${count !== undefined ? count : 'N/A'}</span>
+                </div>
+                <div class="ref-count-display">
+                    <span class="ref-count-label">Total Tracked:</span> <span class="ref-count-value">${totalTracked}</span>
+                </div>
+            `;
+        }
+
+        // Demo 1: Using Keyword
+        document.getElementById('demo1-btn').addEventListener('click', async () => {
+            const output = 'demo1-output';
+            const area = document.getElementById('demo1-area');
+            area.innerHTML = '';
+            document.getElementById(output).innerHTML = '';
+            
+            log(output, '🎬 Starting Demo 1: Using Keyword Simulation', 'info');
+            
+            const recorder = new Recorder({
+                replayContext: { document, container: area },
+                autoReplay: false,
+                debug: true
+            });
+
+            const handler = createRecordHandler(recorder);
+            const proxied = new Proxy({}, handler);
+
+            log(output, '📝 Recording: createElement("div") with using keyword', 'info');
+            
+            {
+                // Simulate using keyword
+                const element = proxied.document.createElement('div');
+                const elementId = recorder.recordings[recorder.recordings.length - 1].resultId;
+                
+                log(output, `✨ Element created (ID: ${elementId})`, 'success');
+                updateRefCount('demo1-refcount', elementId, recorder.objectRefCounts.get(elementId), recorder);
+                
+                element.className = 'created-element';
+                element.innerHTML = '<strong>Created with `using` keyword</strong><br><span class="badge badge-using">USING</span>';
+                proxied.container.appendChild(element);
+                
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                log(output, '⏳ Replaying operations...', 'info');
+                recorder.replay({ document, container: area });
+                
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                log(output, '🔄 Simulating scope exit - calling Symbol.dispose', 'warning');
+                if (typeof element[Symbol.dispose] === 'function') {
+                    element[Symbol.dispose]();
+                    log(output, '♻️ Element disposed via Symbol.dispose', 'dispose');
+                    updateRefCount('demo1-refcount', elementId, recorder.objectRefCounts.get(elementId) || 0, recorder);
+                }
+            }
+            
+            await new Promise(resolve => setTimeout(resolve, 500));
+            log(output, '✅ Demo complete: Object was deterministically cleaned up', 'success');
+        });
+
+        // Demo 2: No Using Keyword
+        let demo2Objects = [];
+        document.getElementById('demo2-create').addEventListener('click', async () => {
+            const output = 'demo2-output';
+            const area = document.getElementById('demo2-area');
+            area.innerHTML = '';
+            document.getElementById(output).innerHTML = '';
+            demo2Objects = [];
+            
+            log(output, '🎬 Starting Demo 2: No Using Keyword', 'info');
+            
+            const recorder = new Recorder({
+                replayContext: { document, container: area },
+                autoReplay: false,
+                useFinalization: true,
+                debug: true
+            });
+
+            const handler = createRecordHandler(recorder);
+            const proxied = new Proxy({}, handler);
+
+            log(output, '📝 Creating 3 elements WITHOUT using keyword', 'warning');
+            
+            for (let i = 0; i < 3; i++) {
+                const element = proxied.document.createElement('div');
+                const elementId = recorder.recordings[recorder.recordings.length - 1].resultId;
+                demo2Objects.push({ element, elementId, recorder });
+                
+                element.className = 'created-element';
+                element.innerHTML = `<strong>Element ${i + 1}</strong> (ID: ${elementId})<br><span class="badge badge-finalized">Awaiting GC</span>`;
+                proxied.container.appendChild(element);
+                
+                log(output, `✨ Element ${i + 1} created (ID: ${elementId})`, 'info');
+            }
+            
+            await new Promise(resolve => setTimeout(resolve, 300));
+            recorder.replay({ document, container: area });
+            
+            const lastObj = demo2Objects[demo2Objects.length - 1];
+            updateRefCount('demo2-refcount', lastObj.elementId, recorder.objectRefCounts.get(lastObj.elementId), recorder);
+            
+            log(output, '⚠️ Objects created but NOT disposed', 'warning');
+            log(output, '📊 They will be cleaned up when garbage collected', 'info');
+            
+            document.getElementById('demo2-gc').disabled = typeof global === 'undefined';
+        });
+
+        document.getElementById('demo2-check').addEventListener('click', () => {
+            const output = 'demo2-output';
+            if (demo2Objects.length === 0) {
+                log(output, '⚠️ No objects created yet', 'warning');
+                return;
+            }
+            
+            const lastObj = demo2Objects[demo2Objects.length - 1];
+            const count = lastObj.recorder.objectRefCounts.get(lastObj.elementId) || 0;
+            updateRefCount('demo2-refcount', lastObj.elementId, count, lastObj.recorder);
+            log(output, `📊 Current ref count for ${lastObj.elementId}: ${count}`, 'info');
+            if (count === 0) {
+                log(output, '✅ Object has been finalized!', 'finalize');
+            }
+        });
+
+        // Demo 3: Comparison
+        document.getElementById('demo3-btn').addEventListener('click', async () => {
+            const output = 'demo3-output';
+            const usingArea = document.getElementById('demo3-using-area');
+            const noUsingArea = document.getElementById('demo3-no-using-area');
+            usingArea.innerHTML = '';
+            noUsingArea.innerHTML = '';
+            document.getElementById(output).innerHTML = '';
+            
+            log(output, '🎬 Starting Demo 3: Comparison', 'info');
+            
+            // With using
+            log(output, '📝 LEFT: Creating element WITH using keyword', 'info');
+            const recorder1 = new Recorder({ replayContext: { document, container: usingArea }, autoReplay: false });
+            const handler1 = createRecordHandler(recorder1);
+            const proxied1 = new Proxy({}, handler1);
+            
+            {
+                const element = proxied1.document.createElement('div');
+                const elementId = recorder1.recordings[recorder1.recordings.length - 1].resultId;
+                element.className = 'created-element';
+                element.innerHTML = '<strong>With `using`</strong><br><span class="badge badge-using">USING</span>';
+                proxied1.container.appendChild(element);
+                
+                await new Promise(resolve => setTimeout(resolve, 200));
+                recorder1.replay({ document, container: usingArea });
+                
+                log(output, `✨ LEFT: Element created (${elementId}), ref count: ${recorder1.objectRefCounts.get(elementId)}`, 'success');
+                
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                if (typeof element[Symbol.dispose] === 'function') {
+                    element[Symbol.dispose]();
+                    log(output, `♻️ LEFT: Element disposed, ref count: ${recorder1.objectRefCounts.get(elementId) || 0}`, 'dispose');
+                }
+            }
+            
+            // Without using
+            log(output, '📝 RIGHT: Creating element WITHOUT using keyword', 'warning');
+            const recorder2 = new Recorder({ replayContext: { document, container: noUsingArea }, autoReplay: false });
+            const handler2 = createRecordHandler(recorder2);
+            const proxied2 = new Proxy({}, handler2);
+            
+            const element2 = proxied2.document.createElement('div');
+            const elementId2 = recorder2.recordings[recorder2.recordings.length - 1].resultId;
+            element2.className = 'created-element';
+            element2.innerHTML = '<strong>Without `using`</strong><br><span class="badge badge-finalized">Awaiting GC</span>';
+            proxied2.container.appendChild(element2);
+            
+            await new Promise(resolve => setTimeout(resolve, 200));
+            recorder2.replay({ document, container: noUsingArea });
+            
+            log(output, `✨ RIGHT: Element created (${elementId2}), ref count: ${recorder2.objectRefCounts.get(elementId2)}`, 'warning');
+            log(output, '📊 RIGHT: Will be cleaned up during garbage collection', 'info');
+            
+            await new Promise(resolve => setTimeout(resolve, 300));
+            log(output, '✅ Comparison complete!', 'success');
+        });
+
+        // Demo 4: Reference Counting
+        let demo4Recorder = null;
+        let demo4Element = null;
+        let demo4ElementId = null;
+
+        document.getElementById('demo4-create').addEventListener('click', () => {
+            const output = 'demo4-output';
+            document.getElementById(output).innerHTML = '';
+            
+            demo4Recorder = new Recorder({ autoReplay: false, debug: true });
+            const handler = createRecordHandler(demo4Recorder);
+            const proxied = new Proxy({}, handler);
+            
+            demo4Element = proxied.document.createElement('div');
+            demo4ElementId = demo4Recorder.recordings[demo4Recorder.recordings.length - 1].resultId;
+            
+            log(output, `✨ Object created (ID: ${demo4ElementId})`, 'success');
+            updateRefCount('demo4-refcount', demo4ElementId, demo4Recorder.objectRefCounts.get(demo4ElementId), demo4Recorder);
+            
+            document.getElementById('demo4-dispose').disabled = false;
+        });
+
+        document.getElementById('demo4-dispose').addEventListener('click', () => {
+            const output = 'demo4-output';
+            if (!demo4Element || !demo4Recorder) {
+                log(output, '⚠️ No object to dispose', 'warning');
+                return;
+            }
+            
+            if (typeof demo4Element[Symbol.dispose] === 'function') {
+                demo4Element[Symbol.dispose]();
+                log(output, `♻️ Object disposed (ID: ${demo4ElementId})`, 'dispose');
+                updateRefCount('demo4-refcount', demo4ElementId, demo4Recorder.objectRefCounts.get(demo4ElementId) || 0, demo4Recorder);
+                document.getElementById('demo4-dispose').disabled = true;
+            }
+        });
+
+        document.getElementById('demo4-reset').addEventListener('click', () => {
+            const output = 'demo4-output';
+            document.getElementById(output).innerHTML = '';
+            document.getElementById('demo4-refcount').innerHTML = '';
+            demo4Recorder = null;
+            demo4Element = null;
+            demo4ElementId = null;
+            document.getElementById('demo4-dispose').disabled = true;
+            log(output, '🔄 Reset complete', 'info');
+        });
+
+        // Initialize
+        document.getElementById('demo1-output').innerHTML = '<div class="log-entry log-info">Ready. Click "Run Demo 1" to start.</div>';
+        document.getElementById('demo2-output').innerHTML = '<div class="log-entry log-info">Ready. Click "Create Elements" to start.</div>';
+        document.getElementById('demo3-output').innerHTML = '<div class="log-entry log-info">Ready. Click "Run Comparison" to start.</div>';
+        document.getElementById('demo4-output').innerHTML = '<div class="log-entry log-info">Ready. Click "Create Object" to start.</div>';
+    </script>
+</body>
+</html>
