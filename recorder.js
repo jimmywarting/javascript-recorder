@@ -9,6 +9,17 @@ class Recorder {
     this.replayContext = options.replayContext || null;
     this.autoReplay = options.autoReplay ?? true; // Default to true
     this.replayScheduled = false;
+    this.port = options.port || null; // MessagePort for cross-context communication
+    this.objectRefCounts = new Map(); // Track reference counts for cross-context objects
+    this.objectRegistry = new Map(); // Store actual objects for reference tracking
+    
+    // If port is provided, set up message handler for receiving replay commands
+    if (this.port) {
+      this.port.onmessage = (event) => {
+        this._handlePortMessage(event.data);
+      };
+      this.port.start();
+    }
   }
 
   /**
@@ -19,8 +30,18 @@ class Recorder {
     if (this.recordingEnabled) {
       this.recordings.push(operation);
       
-      // Schedule automatic replay on next microtask if enabled
-      if (this.autoReplay && this.replayContext && !this.replayScheduled) {
+      // If using MessagePort, send operations to the other context
+      if (this.port && this.autoReplay) {
+        if (!this.replayScheduled) {
+          this.replayScheduled = true;
+          queueMicrotask(() => {
+            this.replayScheduled = false;
+            this._sendOperationsViaPort();
+          });
+        }
+      }
+      // Otherwise use local replay context
+      else if (this.autoReplay && this.replayContext && !this.replayScheduled) {
         this.replayScheduled = true;
         queueMicrotask(() => {
           this.replayScheduled = false;
@@ -183,6 +204,105 @@ class Recorder {
         throw new Error(`Unknown operation type: ${type}`);
     }
   }
+
+  /**
+   * Send operations to the other context via MessagePort
+   * @private
+   */
+  _sendOperationsViaPort() {
+    if (!this.port || this.recordings.length === 0) {
+      return;
+    }
+
+    const recordingsToSend = [...this.recordings];
+    this.recordings = []; // Clear after copying
+
+    // Send operations through the port
+    this.port.postMessage({
+      type: 'replay',
+      operations: recordingsToSend
+    });
+  }
+
+  /**
+   * Handle messages received via MessagePort
+   * @private
+   */
+  _handlePortMessage(data) {
+    if (data.type === 'replay' && this.replayContext) {
+      // Replay operations received from the other context
+      this._replayRecordings(data.operations, this.replayContext);
+    } else if (data.type === 'refCount') {
+      // Handle reference count updates
+      this._updateRefCount(data.objectId, data.delta);
+    }
+  }
+
+  /**
+   * Update reference count for an object
+   * @private
+   */
+  _updateRefCount(objectId, delta) {
+    const currentCount = this.objectRefCounts.get(objectId) || 0;
+    const newCount = currentCount + delta;
+
+    if (newCount <= 0) {
+      // Clean up object when ref count reaches zero
+      this.objectRefCounts.delete(objectId);
+      this.objectRegistry.delete(objectId);
+    } else {
+      this.objectRefCounts.set(objectId, newCount);
+    }
+  }
+
+  /**
+   * Increment reference count for an object
+   * @param {string} objectId - The object identifier
+   */
+  incrementRefCount(objectId) {
+    this._updateRefCount(objectId, 1);
+    
+    // Send ref count update through port if available
+    if (this.port) {
+      this.port.postMessage({
+        type: 'refCount',
+        objectId: objectId,
+        delta: 1
+      });
+    }
+  }
+
+  /**
+   * Decrement reference count for an object
+   * @param {string} objectId - The object identifier
+   */
+  decrementRefCount(objectId) {
+    this._updateRefCount(objectId, -1);
+    
+    // Send ref count update through port if available
+    if (this.port) {
+      this.port.postMessage({
+        type: 'refCount',
+        objectId: objectId,
+        delta: -1
+      });
+    }
+  }
+
+  /**
+   * Dispose method for Symbol.dispose support
+   */
+  [Symbol.dispose]() {
+    // Clean up all references
+    this.objectRefCounts.clear();
+    this.objectRegistry.clear();
+    
+    // Close the port if it exists
+    if (this.port) {
+      this.port.close();
+      this.port = null;
+    }
+  }
 }
 
 /**
@@ -326,5 +446,53 @@ function createRecordHandler(recorder, targetId = 'globalThis', sharedObjectIds 
   };
 }
 
+/**
+ * RecordedObjectHandle - A wrapper for recorded objects that supports Symbol.dispose
+ * This allows using the `using` keyword for automatic cleanup
+ */
+class RecordedObjectHandle {
+  constructor(proxy, objectId, recorder) {
+    this.proxy = proxy;
+    this.objectId = objectId;
+    this.recorder = recorder;
+    
+    // Increment ref count on creation
+    if (recorder && objectId) {
+      recorder.incrementRefCount(objectId);
+    }
+  }
+
+  /**
+   * Get the proxied object
+   */
+  get value() {
+    return this.proxy;
+  }
+
+  /**
+   * Dispose method for Symbol.dispose support
+   * Automatically decrements reference count when scope exits
+   */
+  [Symbol.dispose]() {
+    if (this.recorder && this.objectId) {
+      this.recorder.decrementRefCount(this.objectId);
+    }
+  }
+}
+
+/**
+ * Create a recorded object handle that supports `using` keyword
+ * @param {Recorder} recorder - The recorder instance
+ * @param {Object} target - The target to wrap (optional)
+ * @returns {RecordedObjectHandle} A handle that supports Symbol.dispose
+ */
+function createRecordedObject(recorder, target = {}) {
+  const handler = createRecordHandler(recorder);
+  const proxy = new Proxy(target, handler);
+  
+  // Get the object ID from the handler (it will be 'globalThis' by default)
+  return new RecordedObjectHandle(proxy, 'globalThis', recorder);
+}
+
 // Export for ES modules
-export { Recorder, createRecordHandler };
+export { Recorder, createRecordHandler, RecordedObjectHandle, createRecordedObject };
