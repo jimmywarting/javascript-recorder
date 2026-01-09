@@ -675,6 +675,14 @@ function createRecordHandler(recorder, targetId = 'globalThis', sharedObjectIds 
     return objectIds.get(obj);
   }
 
+  // Check if an object already has an ID without creating one
+  function hasObjectId(obj) {
+    if (obj === null || obj === undefined) {
+      return false;
+    }
+    return objectIds.has(obj);
+  }
+
   // Helper to check if value is a stream that should be transferred
   function isTransferableStream(value) {
     if (typeof ReadableStream !== 'undefined' && value instanceof ReadableStream) {
@@ -819,18 +827,16 @@ function createRecordHandler(recorder, targetId = 'globalThis', sharedObjectIds 
     return args.map(arg => {
       // Check if this is a recorded object/proxy first (including function proxies)
       if (arg && typeof arg === 'object') {
-        const id = getObjectId(arg);
-        if (id) {
-          return { __recordedObjectId: id };
+        if (hasObjectId(arg)) {
+          return { __recordedObjectId: getObjectId(arg) };
         }
       }
       
       // Check if this is a proxy function
       if (typeof arg === 'function') {
-        const id = getObjectId(arg);
-        if (id) {
+        if (hasObjectId(arg)) {
           // This is a proxy function, not a real callback
-          return { __recordedObjectId: id };
+          return { __recordedObjectId: getObjectId(arg) };
         }
         
         // This is a real user function - create MessageChannel
